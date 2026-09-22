@@ -1,0 +1,24 @@
+{
+  "name": "ler-mais-server",
+  "version": "0.1.0",
+  "description": "Backend do jogo Ler+ (Fastify + Prisma + PostgreSQL)",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node src/scripts/seed.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@prisma/client": "^5.19.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1"
+  },
+  "devDependencies": {
+    "pino-pretty": "^11.2.2",
+    "prisma": "^5.19.0"
+  }
+}

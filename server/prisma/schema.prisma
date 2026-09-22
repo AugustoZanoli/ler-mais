@@ -1,0 +1,77 @@
+// Schema do banco do jogo Ler+.
+// Banco: PostgreSQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Candidatos (work IDs do Open Library) que ainda podem virar "livro do dia".
+/// Populamos via seed com uma lista curada de obras famosas de fantasia/aventura.
+/// A ordem (createdAt) reflete popularidade: os mais famosos primeiro.
+model SeedWork {
+  id        String   @id @default(cuid())
+  /// Work ID no Open Library, ex: "OL82563W"
+  workKey   String   @unique @map("work_key")
+  /// Marcado true quando já foi resolvido em um Book / usado.
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("seed_works")
+}
+
+/// Livro já enriquecido a partir do Open Library.
+/// Guardamos os dados para não bater na API toda vez e para histórico/controle.
+model Book {
+  id          String   @id @default(cuid())
+  /// Work ID no Open Library (fonte da verdade), ex: "OL82563W"
+  workKey     String   @unique @map("work_key")
+  title       String
+  author      String?
+  /// URL da capa (Open Library covers), pode ser nula.
+  coverUrl    String?  @map("cover_url")
+  /// Sinopse (a "síntese da contracapa"), texto completo sem mascarar.
+  synopsis    String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  dailyPuzzles DailyPuzzle[]
+
+  @@map("books")
+}
+
+/// O livro de um dia específico. Um por dia (puzzleDate é único).
+/// É isto que o endpoint /api/daily resolve.
+model DailyPuzzle {
+  id         String   @id @default(cuid())
+  /// Dia do puzzle, normalizado para meia-noite UTC. Único: 1 livro por dia.
+  puzzleDate DateTime @unique @map("puzzle_date") @db.Date
+  bookId     String   @map("book_id")
+  book       Book     @relation(fields: [bookId], references: [id])
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("daily_puzzles")
+}
+
+// --- Futuro: usuários e progresso ---
+// Deixado como referência para quando adicionarmos contas.
+// model User {
+//   id        String   @id @default(cuid())
+//   email     String   @unique
+//   createdAt DateTime @default(now()) @map("created_at")
+//   attempts  Attempt[]
+//   @@map("users")
+// }
+//
+// model Attempt {
+//   id            String      @id @default(cuid())
+//   userId        String      @map("user_id")
+//   dailyPuzzleId String      @map("daily_puzzle_id")
+//   guess         String
+//   correct       Boolean
+//   createdAt     DateTime    @default(now()) @map("created_at")
+//   @@map("attempts")
+// }
