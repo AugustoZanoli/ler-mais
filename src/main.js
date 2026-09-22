@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT } from './config.js';
 import BootScene from './scenes/BootScene.js';
+import MenuScene from './scenes/MenuScene.js';
 import GameScene from './scenes/GameScene.js';
 
 const config = {
@@ -18,7 +19,7 @@ const config = {
   dom: {
     createContainer: true // necessário pros inputs HTML do painel
   },
-  scene: [BootScene, GameScene]
+  scene: [BootScene, MenuScene, GameScene]
 };
 
 // eslint-disable-next-line no-new
