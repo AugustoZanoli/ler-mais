@@ -4,26 +4,47 @@ import { dailyCoverUrl } from '../data/api.js';
 /**
  * SidePanel
  * ---------
- * Painel lateral da direita. Tem 3 estados (PANEL_STATE):
- *  - GUESS:    livro aberto -> dicas + campo pra adivinhar o título
- *  - COVER:    livro fechado -> capa borrada
- *  - SYNOPSIS: lado direito clicado -> sinopse (contracapa) com palavras faltando
+ * Painel lateral da direita. Estados (PANEL_STATE):
+ *  - GUESS:    palpites estilo Termo (área scrollável) + input fixo + botão Dicas
+ *  - COVER:    capa borrada (revelada ao acertar)
+ *  - SYNOPSIS: sinopse com lacunas (completa ao acertar)
  *
- * Os dados vêm da API (livro do dia). O painel NÃO conhece o título:
- * a validação do palpite é feita no servidor via onGuess (assíncrono).
+ * O painel NÃO conhece o título: a validação é feita no servidor (onGuess),
+ * que devolve só as cores por letra (feedback estilo Termo).
+ *
+ * Layout fixo do estado GUESS (de cima pra baixo):
+ *   header + botão Dicas  |  lista scrollável de tentativas  |  input  |  msg
  */
 export default class SidePanel {
-  /**
-   * @param {Phaser.Scene} scene
-   * @param {object} puzzle payload do /api/daily { hasCover, hints, synopsisMasked, ... }
-   * @param {(guess:string)=>Promise<{correct:boolean,title:string|null}>} onGuess
-   */
+  // Cores do feedback estilo Termo.
+  static COLORS = {
+    green: 0x6aaa64, // letra certa, palavra e posição certas
+    yellow: 0xc9b458, // letra certa, palavra certa, posição errada
+    purple: 0x7a3fb0, // letra existe em outra palavra
+    gray: 0x3a2c22 // letra não existe
+  };
+
+  // Geometria fixa do painel (coordenadas absolutas na tela base 960x540).
+  // Base reservada (de baixo pra cima): input (~80px) + mensagem (~24px).
+  static LAYOUT = {
+    headerY: 18,
+    listTop: 58, // topo da área de tentativas
+    listBottom: GAME_HEIGHT - 150, // fim da lista (acima do input)
+    inputY: GAME_HEIGHT - 140, // input fixo (deixa ~140px de folga até a base)
+    msgY: GAME_HEIGHT - 26 // mensagem acertou/errou, ABAIXO do input
+  };
+
   constructor(scene, puzzle, onGuess) {
     this.scene = scene;
     this.puzzle = puzzle;
     this.onGuess = onGuess;
     this.state = PANEL_STATE.GUESS;
     this.solved = false;
+    this.hintsOpen = false;
+
+    // Deslocamento vertical acumulado das tentativas + scroll atual.
+    this.attemptsHeight = 0;
+    this.scrollY = 0;
 
     this.x = SCENE_WIDTH;
     this.container = scene.add.container(0, 0);
@@ -43,15 +64,18 @@ export default class SidePanel {
   }
 
   buildContent() {
-    this.header = this.scene.add.text(this.x + 20, 18, '', {
+    const L = SidePanel.LAYOUT;
+
+    this.header = this.scene.add.text(this.x + 20, L.headerY, '', {
       fontFamily: 'Courier New, monospace',
-      fontSize: '20px',
+      fontSize: '18px',
       color: '#f2e6c8',
       fontStyle: 'bold'
     });
     this.container.add(this.header);
 
-    this.body = this.scene.add.text(this.x + 20, 60, '', {
+    // Corpo de texto usado pelos estados COVER/SYNOPSIS.
+    this.body = this.scene.add.text(this.x + 20, L.listTop, '', {
       fontFamily: 'Courier New, monospace',
       fontSize: '13px',
       color: '#d9c7a0',
@@ -61,54 +85,134 @@ export default class SidePanel {
     this.container.add(this.body);
 
     this.buildCoverImage();
+    this.buildAttemptsList();
+    this.buildHintsButton();
     this.buildGuessInput();
 
-    this.feedback = this.scene.add.text(this.x + 20, GAME_HEIGHT - 70, '', {
+    // Mensagem de acertou/errou — fixa, ABAIXO do input.
+    this.feedback = this.scene.add.text(this.x + 20, L.msgY, '', {
       fontFamily: 'Courier New, monospace',
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#8affc1',
       wordWrap: { width: PANEL_WIDTH - 40 }
     });
     this.container.add(this.feedback);
+
+    this.buildHintsOverlay();
   }
 
-  // Usa a capa real da API (se houver) ou o mock; aplica blur nos dois casos.
+  // ---- Área scrollável de tentativas ----
+  buildAttemptsList() {
+    const L = SidePanel.LAYOUT;
+    // Container que segura as linhas; movido no eixo Y para "rolar".
+    this.attemptsBox = this.scene.add.container(0, 0);
+    this.container.add(this.attemptsBox);
+
+    // Máscara: recorta o que sai da área da lista (scroll de verdade).
+    const maskG = this.scene.make.graphics();
+    maskG.fillRect(this.x + 12, L.listTop, PANEL_WIDTH - 24, L.listBottom - L.listTop);
+    this.attemptsBox.setMask(maskG.createGeometryMask());
+    this.listMaskG = maskG;
+
+    // Scroll com a roda do mouse quando o ponteiro está sobre o painel.
+    this.scene.input.on('wheel', (pointer, over, dx, dy) => {
+      if (this.state !== PANEL_STATE.GUESS) return;
+      if (pointer.x < this.x) return; // só quando sobre o painel
+      this.scrollBy(dy * 0.5);
+    });
+  }
+
+  scrollBy(delta) {
+    const L = SidePanel.LAYOUT;
+    const viewH = L.listBottom - L.listTop;
+    const maxScroll = Math.max(0, this.attemptsHeight - viewH);
+    this.scrollY = Math.min(Math.max(this.scrollY + delta, 0), maxScroll);
+    this.attemptsBox.y = -this.scrollY;
+  }
+
+  // Mantém o scroll no fim (última tentativa visível).
+  scrollToBottom() {
+    const L = SidePanel.LAYOUT;
+    const viewH = L.listBottom - L.listTop;
+    this.scrollY = Math.max(0, this.attemptsHeight - viewH);
+    this.attemptsBox.y = -this.scrollY;
+  }
+
+  // ---- Botão de dicas ----
+  buildHintsButton() {
+    const L = SidePanel.LAYOUT;
+    this.hintsBtn = this.scene.add
+      .text(this.x + PANEL_WIDTH - 16, L.headerY + 2, '💡 Dicas', {
+        fontFamily: 'Courier New, monospace',
+        fontSize: '13px',
+        color: '#24170f',
+        backgroundColor: '#c9a227',
+        padding: { x: 6, y: 3 }
+      })
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true });
+    this.hintsBtn.on('pointerdown', () => this.toggleHints());
+    this.container.add(this.hintsBtn);
+  }
+
+  buildHintsOverlay() {
+    // Painel de dicas que abre sobre a lista (começa escondido).
+    this.hintsPanel = this.scene.add.container(0, 0).setVisible(false);
+
+    const bg = this.scene.add
+      .rectangle(this.x + 12, SidePanel.LAYOUT.listTop, PANEL_WIDTH - 24, 150, 0x2f2015)
+      .setOrigin(0, 0)
+      .setStrokeStyle(2, 0xc9a227);
+    const text = this.scene.add.text(this.x + 22, SidePanel.LAYOUT.listTop + 10, '', {
+      fontFamily: 'Courier New, monospace',
+      fontSize: '13px',
+      color: '#f2e6c8',
+      wordWrap: { width: PANEL_WIDTH - 48 },
+      lineSpacing: 6
+    });
+    this.hintsText = text;
+    this.hintsPanel.add(bg);
+    this.hintsPanel.add(text);
+    this.container.add(this.hintsPanel);
+  }
+
+  toggleHints() {
+    this.hintsOpen = !this.hintsOpen;
+    if (this.hintsOpen) this.hintsText.setText(this.buildHintsText());
+    this.hintsPanel.setVisible(this.hintsOpen && this.state === PANEL_STATE.GUESS);
+  }
+
+  buildHintsText() {
+    const lines = [];
+    (this.puzzle.hints || []).forEach((h, i) => lines.push(`${i + 1}. ${h}`));
+    lines.push('');
+    lines.push(`Palavras no título: ${this.puzzle.wordCount ?? '?'}`);
+    return lines.join('\n');
+  }
+
+  // ---- Capa ----
   buildCoverImage() {
     const cx = this.x + PANEL_WIDTH / 2;
     const cy = GAME_HEIGHT / 2;
 
-    // Começa com a capa local (frente do livro) e escala pro painel.
     this.coverImage = this.scene.add.image(cx, cy, TEX.BOOK_FRONT).setVisible(false);
     this.container.add(this.coverImage);
     this.fitCover();
 
-    if (this.puzzle.hasCover) {
-      this.loadRemoteCover();
-    }
+    if (this.puzzle.hasCover) this.loadRemoteCover();
 
-    // Borra a capa (o "efeito" de capa borrada). preFX existe no WebGL.
-    // Guardamos o handle pra poder remover o blur quando o jogador acertar.
     if (this.coverImage.preFX) {
       this.coverBlur = this.coverImage.preFX.addBlur(0, 2, 2, 1, 0xffffff, 6);
     }
   }
 
-  // Carrega a capa via proxy do backend (mesmo domínio da API — sem CORS).
-  // Usa eventos específicos do arquivo pra evitar o problema de o 'complete'
-  // do loader não disparar quando a cena já foi criada.
   loadRemoteCover() {
-    // Key única por data evita colidir com uma textura já em cache (o Phaser
-    // ignora load.image com key repetida, o que fazia a capa "não aparecer").
     const key = `cover-${this.puzzle.date || 'today'}`;
-
-    // Se já está no cache (recarregou a cena), usa direto.
     if (this.scene.textures.exists(key)) {
       this.coverImage.setTexture(key);
       this.fitCover();
       return;
     }
-
-    // Evento específico deste arquivo: dispara só quando ESTE load termina.
     this.scene.load.once(`filecomplete-image-${key}`, () => {
       this.coverImage.setTexture(key);
       this.fitCover();
@@ -118,16 +222,11 @@ export default class SidePanel {
         console.warn('[cover] falha ao carregar a capa; usando o mock.');
       }
     });
-
-    // Imagem vem de outra origem (backend:3333). Sem crossOrigin, o Phaser
-    // marca a textura como "tainted" e ela não renderiza (some sem erro).
     this.scene.load.crossOrigin = 'anonymous';
     this.scene.load.image(key, dailyCoverUrl(this.puzzle.date));
-    this.scene.load.start(); // necessário quando a cena já está ativa
+    this.scene.load.start();
   }
 
-  // Escala a capa (mock ou remota) para caber na largura do painel,
-  // limitando também pela altura disponível. Mantém a proporção.
   fitCover() {
     const maxW = PANEL_WIDTH - 60;
     const maxH = GAME_HEIGHT - 120;
@@ -135,54 +234,140 @@ export default class SidePanel {
     this.coverImage.setScale(scale);
   }
 
+  // ---- Input desenhado no PRÓPRIO Phaser (não é DOM) ----
+  // Motivo: o overlay DOM do Phaser não acompanha o Scale.FIT, então um <input>
+  // HTML "escapa" da tela. Desenhando o campo no canvas ele escala junto com
+  // tudo. Capturamos o texto pelo teclado do próprio Phaser.
   buildGuessInput() {
-    const inputWidth = PANEL_WIDTH - 40;
-    const html = `
-      <div style="width:${inputWidth}px; font-family:'Courier New',monospace;">
-        <input id="guess-input" type="text" placeholder="Qual é o livro?"
-          style="width:100%; box-sizing:border-box; padding:8px; font-size:14px;
-                 background:#f2e6c8; border:2px solid #c9a227; color:#3b2a1f;
-                 font-family:'Courier New',monospace; outline:none;" />
-        <button id="guess-btn"
-          style="width:100%; margin-top:8px; padding:8px; font-size:14px; cursor:pointer;
-                 background:#c9a227; border:none; color:#24170f; font-weight:bold;
-                 font-family:'Courier New',monospace;">Adivinhar</button>
-      </div>`;
+    const L = SidePanel.LAYOUT;
+    const w = PANEL_WIDTH - 40;
+    const fieldH = 34;
+    const btnH = 30;
+    const left = this.x + 20;
 
-    this.guessDom = this.scene.add.dom(this.x + 20, GAME_HEIGHT - 150).createFromHTML(html);
-    this.guessDom.setOrigin(0, 0);
+    this.typed = ''; // texto digitado
+    this.inputGroup = this.scene.add.container(0, 0);
+    this.container.add(this.inputGroup);
 
-    const inputEl = this.guessDom.getChildByID('guess-input');
-    const btnEl = this.guessDom.getChildByID('guess-btn');
+    // Caixa do campo de texto.
+    this.inputBox = this.scene.add
+      .rectangle(left, L.inputY, w, fieldH, 0xf2e6c8)
+      .setOrigin(0, 0)
+      .setStrokeStyle(2, 0xc9a227)
+      .setInteractive({ useHandCursor: true });
 
-    const submit = async () => {
-      if (this.solved) return;
-      const value = (inputEl.value || '').trim();
-      if (!value) return;
+    // Texto digitado (ou placeholder).
+    this.inputText = this.scene.add.text(left + 8, L.inputY + fieldH / 2, '', {
+      fontFamily: 'Courier New, monospace',
+      fontSize: '14px',
+      color: '#3b2a1f'
+    }).setOrigin(0, 0.5);
 
-      btnEl.disabled = true;
-      this.showFeedback('Verificando...', true);
-      try {
-        const { correct, title, synopsis } = await this.onGuess(value);
-        if (correct) {
-          this.solved = true;
-          this.showFeedback(`Acertou! É "${title}".`, true);
-          inputEl.disabled = true;
-          this.reveal(synopsis); // desborra a capa e libera a sinopse completa
-        } else {
-          this.showFeedback('Não é esse. Tente de novo!', false);
-          btnEl.disabled = false;
-        }
-      } catch (err) {
-        this.showFeedback('Erro ao validar. Tente de novo.', false);
-        btnEl.disabled = false;
+    // Botão "Adivinhar".
+    const btnY = L.inputY + fieldH + 6;
+    this.submitBtn = this.scene.add
+      .rectangle(left, btnY, w, btnH, 0xc9a227)
+      .setOrigin(0, 0)
+      .setInteractive({ useHandCursor: true });
+    this.submitLabel = this.scene.add
+      .text(left + w / 2, btnY + btnH / 2, 'ADIVINHAR', {
+        fontFamily: 'Courier New, monospace',
+        fontSize: '14px',
+        color: '#24170f',
+        fontStyle: 'bold'
+      })
+      .setOrigin(0.5);
+
+    this.inputGroup.add([this.inputBox, this.inputText, this.submitBtn, this.submitLabel]);
+
+    // Clicar na caixa dá foco ao input (ativa o cursor).
+    this.inputBox.on('pointerdown', () => this.focusInput());
+    this.submitBtn.on('pointerdown', () => this.submitGuess());
+
+    // Captura de teclado nativa do Phaser.
+    this.inputFocused = false;
+    this.scene.input.keyboard.on('keydown', (ev) => this.onKey(ev));
+
+    this.renderInputText();
+    // Já começa "focado" pra facilitar (cursor piscando).
+    this.focusInput();
+  }
+
+  focusInput() {
+    this.inputFocused = true;
+    this.renderInputText();
+  }
+
+  onKey(ev) {
+    if (this.solved || this.state !== PANEL_STATE.GUESS || !this.inputFocused) return;
+
+    if (ev.key === 'Enter') {
+      this.submitGuess();
+      return;
+    }
+    if (ev.key === 'Backspace') {
+      this.typed = this.typed.slice(0, -1);
+      this.renderInputText();
+      return;
+    }
+    // Aceita letras, números, espaço e alguns sinais comuns de título.
+    if (ev.key.length === 1 && /[\p{L}\p{N} '\-:.,&!?]/u.test(ev.key)) {
+      if (this.typed.length < 60) this.typed += ev.key;
+      this.renderInputText();
+    }
+  }
+
+  renderInputText() {
+    const w = PANEL_WIDTH - 40;
+    const cursor = this.inputFocused ? '|' : '';
+    if (this.typed) {
+      this.inputText.setColor('#3b2a1f').setText(this.typed + cursor);
+    } else {
+      this.inputText.setColor('#9b8b73').setText(this.inputFocused ? cursor : 'Qual é o livro?');
+    }
+    // Trunca visualmente se passar da largura da caixa.
+    if (this.inputText.width > w - 16) {
+      // Mostra o final do texto (o que está sendo digitado).
+      const overflow = this.inputText.width - (w - 16);
+      this.inputText.setX(this.x + 20 + 8 - overflow);
+    } else {
+      this.inputText.setX(this.x + 20 + 8);
+    }
+  }
+
+  async submitGuess() {
+    if (this.solved) return;
+    const value = this.typed.trim();
+    if (!value) return;
+
+    this.setSubmitEnabled(false);
+    this.showFeedback('Verificando...', true);
+    try {
+      const { correct, title, synopsis, feedback } = await this.onGuess(value);
+      this.renderAttempt(feedback);
+      this.scrollToBottom();
+
+      if (correct) {
+        this.solved = true;
+        this.showFeedback(`Acertou! É "${title}".`, true);
+        this.inputGroup.setVisible(false);
+        this.reveal(synopsis);
+      } else {
+        this.showFeedback('Não é esse. Tente de novo!', false);
+        this.setSubmitEnabled(true);
+        this.typed = '';
+        this.renderInputText();
       }
-    };
+    } catch (err) {
+      this.showFeedback('Erro ao validar. Tente de novo.', false);
+      this.setSubmitEnabled(true);
+    }
+  }
 
-    btnEl.addEventListener('click', submit);
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submit();
-    });
+  setSubmitEnabled(enabled) {
+    this.submitBtn.setFillStyle(enabled ? 0xc9a227 : 0x8a7320);
+    if (enabled) this.submitBtn.setInteractive({ useHandCursor: true });
+    else this.submitBtn.disableInteractive();
   }
 
   showFeedback(msg, ok) {
@@ -190,40 +375,88 @@ export default class SidePanel {
     this.feedback.setColor(ok ? '#8affc1' : '#ff9b8a');
   }
 
-  // Chamado quando o jogador acerta: remove o blur da capa e guarda a
-  // sinopse completa. Reaplica o estado atual pra atualizar a tela na hora.
+  // Desenha uma tentativa como linha(s) de quadradinhos coloridos, empilhando
+  // no attemptsBox (que é recortado pela máscara e rolável).
+  renderAttempt(feedback) {
+    if (!Array.isArray(feedback)) return;
+
+    const L = SidePanel.LAYOUT;
+    const cell = 20;
+    const gap = 2;
+    const wordGap = 8;
+    const rowH = cell + 6;
+
+    // Coordenadas relativas ao topo da lista; o scroll move o container.
+    let localY = this.attemptsHeight;
+    let x = this.x + 20;
+
+    const newLine = () => {
+      localY += rowH;
+      x = this.x + 20;
+    };
+
+    for (const word of feedback) {
+      // Se a palavra não couber na linha atual, quebra antes de desenhá-la.
+      const wordWidth = word.length * (cell + gap) + wordGap;
+      if (x + wordWidth > this.x + PANEL_WIDTH - 12 && x > this.x + 20) newLine();
+
+      for (const { char, status } of word) {
+        const color = SidePanel.COLORS[status] ?? SidePanel.COLORS.gray;
+        const yAbs = L.listTop + localY;
+        const rect = this.scene.add.rectangle(x, yAbs, cell, cell, color).setOrigin(0, 0);
+        const letter = this.scene.add
+          .text(x + cell / 2, yAbs + cell / 2, char.toUpperCase(), {
+            fontFamily: 'Courier New, monospace',
+            fontSize: '13px',
+            color: '#ffffff',
+            fontStyle: 'bold'
+          })
+          .setOrigin(0.5);
+        this.attemptsBox.add(rect);
+        this.attemptsBox.add(letter);
+        x += cell + gap;
+      }
+      x += wordGap;
+    }
+
+    // Avança a altura total (uma linha a mais + respiro entre tentativas).
+    this.attemptsHeight = localY + rowH + 6;
+  }
+
   reveal(fullSynopsis) {
     this.revealed = true;
     if (fullSynopsis) this.puzzle.synopsis = fullSynopsis;
 
-    // Remove o efeito de blur da capa (fica nítida).
     if (this.coverBlur && this.coverImage.preFX) {
       this.coverImage.preFX.remove(this.coverBlur);
       this.coverBlur = null;
     }
-
-    // Atualiza a visão atual (capa/sinopse) refletindo o estado resolvido.
     this.setState(this.state);
   }
 
   setState(state) {
     this.state = state;
 
+    // Reset de visibilidade.
     this.coverImage.setVisible(false);
-    this.guessDom.setVisible(false);
-    this.body.setVisible(true);
+    this.inputGroup.setVisible(false);
+    this.body.setVisible(false);
+    this.attemptsBox.setVisible(false);
+    this.hintsBtn.setVisible(false);
+    this.hintsPanel.setVisible(false);
 
     if (state === PANEL_STATE.GUESS) {
       this.header.setText('Descubra o Livro');
-      this.body.setText(this.buildHintsText());
-      this.guessDom.setVisible(true);
+      this.attemptsBox.setVisible(true);
+      this.hintsBtn.setVisible(true);
+      if (!this.solved) this.inputGroup.setVisible(true);
+      this.hintsPanel.setVisible(this.hintsOpen);
     } else if (state === PANEL_STATE.COVER) {
       this.header.setText(this.revealed ? 'Capa' : 'Capa (borrada)');
-      this.body.setVisible(false);
       this.coverImage.setVisible(true);
     } else if (state === PANEL_STATE.SYNOPSIS) {
+      this.body.setVisible(true);
       if (this.revealed) {
-        // Depois de acertar: sinopse completa, sem lacunas.
         this.header.setText('Sinopse');
         this.body.setText(this.puzzle.synopsis || this.puzzle.synopsisMasked || '(sem sinopse)');
       } else {
@@ -231,13 +464,5 @@ export default class SidePanel {
         this.body.setText(this.puzzle.synopsisMasked || '(sem sinopse disponível)');
       }
     }
-  }
-
-  buildHintsText() {
-    const lines = ['Dicas:', ''];
-    (this.puzzle.hints || []).forEach((h, i) => lines.push(`${i + 1}. ${h}`));
-    lines.push('');
-    lines.push(`Palavras no título: ${this.puzzle.wordCount ?? '?'}`);
-    return lines.join('\n');
   }
 }

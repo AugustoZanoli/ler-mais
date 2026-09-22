@@ -11,6 +11,7 @@
 import { prisma } from '../lib/prisma.js';
 import { fetchWork, isPlayable, resolveBestCover } from '../lib/openLibrary.js';
 import { maskSynopsis } from '../lib/mask.js';
+import { scoreGuess } from '../lib/termo.js';
 import { todayUTC } from '../lib/date.js';
 
 /**
@@ -133,31 +134,37 @@ function buildHints(book) {
 }
 
 /**
- * Valida um palpite contra o título real do puzzle de uma data.
+ * Valida um palpite contra o título do puzzle e retorna o feedback estilo Termo.
+ * O título real NÃO vai no payload (só as cores por letra), exceto quando o
+ * jogador acerta — aí liberamos título e sinopse completa.
  * @param {string} guess
  * @param {Date} [date]
- * @returns {Promise<{correct:boolean, title:string|null, synopsis:string|null}>}
+ * @returns {Promise<{correct:boolean, feedback:object[]|null, wordLengths:number[], title:string|null, synopsis:string|null}>}
  */
 export async function checkGuess(guess, date = todayUTC()) {
   const puzzle = await prisma.dailyPuzzle.findUnique({
     where: { puzzleDate: date },
     include: { book: true }
   });
-  if (!puzzle) return { correct: false, title: null, synopsis: null };
+  if (!puzzle) {
+    return { correct: false, feedback: null, wordLengths: [], title: null, synopsis: null };
+  }
 
-  const norm = (s) =>
-    s
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+  const { correct, words } = scoreGuess(guess, puzzle.book.title);
 
-  const correct = norm(guess) === norm(puzzle.book.title);
-  // Só revela título e sinopse completa DEPOIS de acertar (não vaza antes).
+  // Comprimento de cada palavra do título (dica de estrutura, não vaza letras).
+  const wordLengths = puzzle.book.title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.length);
+
   return {
     correct,
+    feedback: words, // [[{char,status}, ...], ...] — cores por letra/palavra
+    wordLengths,
     title: correct ? puzzle.book.title : null,
     synopsis: correct ? puzzle.book.synopsis : null
   };
