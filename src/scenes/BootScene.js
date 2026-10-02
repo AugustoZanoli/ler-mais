@@ -33,6 +33,7 @@ export default class BootScene extends Phaser.Scene {
     this.load.image(TEX.BOOK_FRONT, 'assets/book/closed_book_front.png'); // capa (frente)
     this.load.image(TEX.BOOK_BACK, 'assets/book/closed_book_back.png'); // contracapa (verso)
     this.load.image(TEX.MENU_BG, 'assets/menu/fundo_menu.png'); // fundo do menu
+    this.load.image(TEX.SHELVES, 'assets/prateleira/bookshelv.png'); // prateleira
 
     // Música de fundo (faixa 8D chill). Coloque o arquivo em
     // public/assets/audio/ com um destes nomes. Fornecemos mp3 + ogg pra
@@ -50,9 +51,8 @@ export default class BootScene extends Phaser.Scene {
     this.scene.start('MenuScene');
   }
 
-  // Só prateleiras e mesa continuam mockadas (ainda sem arte real).
+  // Só a mesa continua mockada (ainda sem arte real).
   generateMockTextures() {
-    this.makeShelves();
     this.makeDesk();
   }
 
