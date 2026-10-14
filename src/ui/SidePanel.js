@@ -234,6 +234,52 @@ export default class SidePanel {
     this.coverImage.setScale(scale);
   }
 
+  // Desenha um fundo sutil de caixinhas com a estrutura do título (quantas
+  // palavras, quantas letras cada uma), igual ao Termo revelando o tamanho
+  // da palavra-alvo antes do primeiro palpite. É só referência visual —
+  // não interfere na digitação (o campo continua texto livre).
+  // Encolhe a célula pra sempre caber numa linha só dentro do campo.
+  buildWordLengthGuide(left, fieldH) {
+    const lengths = this.puzzle.wordLengths;
+    if (!Array.isArray(lengths) || lengths.length === 0) return null;
+
+    const totalLetters = lengths.reduce((sum, n) => sum + n, 0);
+    if (totalLetters === 0) return null;
+
+    const w = PANEL_WIDTH - 40;
+    const padX = 8;
+    const availableW = w - padX * 2;
+    const letterGap = 2;
+    const wordGap = 6;
+
+    const totalLetterGaps = totalLetters - lengths.length;
+    const totalWordGaps = (lengths.length - 1) * wordGap;
+
+    let cellW = Math.floor(
+      (availableW - totalLetterGaps * letterGap - totalWordGaps) / totalLetters
+    );
+    cellW = Math.max(6, Math.min(16, cellW));
+
+    const cellH = fieldH - 12;
+    const y = SidePanel.LAYOUT.inputY + 6;
+
+    const g = this.scene.add.graphics();
+    g.fillStyle(0x3a2c22, 0.18);
+    g.lineStyle(1, 0x3a2c22, 0.35);
+
+    let x = left + padX;
+    lengths.forEach((len) => {
+      for (let i = 0; i < len; i++) {
+        g.fillRect(x, y, cellW, cellH);
+        g.strokeRect(x, y, cellW, cellH);
+        x += cellW + letterGap;
+      }
+      x += wordGap - letterGap;
+    });
+
+    return g;
+  }
+
   // ---- Input desenhado no PRÓPRIO Phaser (não é DOM) ----
   // Motivo: o overlay DOM do Phaser não acompanha o Scale.FIT, então um <input>
   // HTML "escapa" da tela. Desenhando o campo no canvas ele escala junto com
@@ -255,6 +301,9 @@ export default class SidePanel {
       .setOrigin(0, 0)
       .setStrokeStyle(2, 0xc9a227)
       .setInteractive({ useHandCursor: true });
+
+    // Fundo sutil com a estrutura do título (ver buildWordLengthGuide).
+    this.wordGuideG = this.buildWordLengthGuide(left, fieldH);
 
     // Texto digitado (ou placeholder).
     this.inputText = this.scene.add.text(left + 8, L.inputY + fieldH / 2, '', {
@@ -278,7 +327,10 @@ export default class SidePanel {
       })
       .setOrigin(0.5);
 
-    this.inputGroup.add([this.inputBox, this.inputText, this.submitBtn, this.submitLabel]);
+    const inputChildren = [this.inputBox];
+    if (this.wordGuideG) inputChildren.push(this.wordGuideG);
+    inputChildren.push(this.inputText, this.submitBtn, this.submitLabel);
+    this.inputGroup.add(inputChildren);
 
     // Clicar na caixa dá foco ao input (ativa o cursor).
     this.inputBox.on('pointerdown', () => this.focusInput());
