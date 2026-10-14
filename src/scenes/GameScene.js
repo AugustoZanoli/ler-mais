@@ -1,6 +1,7 @@
 import { SCENE_WIDTH, GAME_HEIGHT, PANEL_STATE, TEX, AUDIO } from '../config.js';
 import { fetchDaily, submitGuess } from '../data/api.js';
 import SidePanel from '../ui/SidePanel.js';
+import TutorialModal from '../ui/TutorialModal.js';
 
 /**
  * GameScene
@@ -29,6 +30,7 @@ export default class GameScene extends Phaser.Scene {
     this.buildScenery();
     this.buildBook();
     this.setupMusic();
+    this.buildTutorial();
 
     // Mensagem de carregamento enquanto busca o livro do dia.
     this.loadingText = this.add
@@ -89,6 +91,37 @@ export default class GameScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
 
     this.muteBtn.on('pointerdown', () => this.toggleMute());
+  }
+
+  // Tutorial de "como jogar": abre sozinho na primeira visita (localStorage)
+  // e pode ser reaberto a qualquer momento pelo botão ⓘ.
+  buildTutorial() {
+    this.tutorial = new TutorialModal(this);
+    this.buildInfoButton();
+    if (!TutorialModal.hasBeenSeen()) {
+      this.tutorial.open();
+    }
+  }
+
+  buildInfoButton() {
+    // Botão de informação, à esquerda do botão de mute (SCENE_WIDTH - 22, 22).
+    const x = SCENE_WIDTH - 70;
+    const y = 22;
+
+    this.infoBtn = this.add
+      .text(x, y, 'ⓘ', {
+        fontFamily: 'Courier New, monospace',
+        fontSize: '22px',
+        color: '#f2e6c8',
+        backgroundColor: '#00000066',
+        padding: { x: 6, y: 4 }
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(1000)
+      .setInteractive({ useHandCursor: true });
+
+    this.infoBtn.on('pointerdown', () => this.tutorial.open());
   }
 
   toggleMute() {
