@@ -258,7 +258,7 @@ export default class SidePanel {
     let cellW = Math.floor(
       (availableW - totalLetterGaps * letterGap - totalWordGaps) / totalLetters
     );
-    cellW = Math.max(6, Math.min(16, cellW));
+    cellW = Math.max(1, Math.min(16, cellW));
 
     const cellH = fieldH - 12;
     const y = SidePanel.LAYOUT.inputY + 6;
