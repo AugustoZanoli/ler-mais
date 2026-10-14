@@ -95,10 +95,15 @@ export default class TutorialModal {
 
   open() {
     this.container.setVisible(true);
+    // Desliga a captura de teclado da cena enquanto o modal está aberto, pra
+    // evitar que teclas digitadas (ou ENTER) vazem pro campo de palpite do
+    // SidePanel escondido atrás do backdrop (o backdrop só bloqueia cliques).
+    this.scene.input.keyboard.enabled = false;
   }
 
   close() {
     this.container.setVisible(false);
+    this.scene.input.keyboard.enabled = true;
     this.markSeen();
   }
 
