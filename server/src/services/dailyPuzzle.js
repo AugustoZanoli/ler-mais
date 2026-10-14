@@ -118,7 +118,10 @@ export function toPublicPuzzle(puzzle) {
     synopsisMasked: masked,
     // Metadados úteis pro front sem vazar a resposta:
     titleLength: book.title.length,
-    wordCount: book.title.trim().split(/\s+/).length
+    wordCount: book.title.trim().split(/\s+/).length,
+    // Tamanho de cada palavra do título (dica estrutural, igual ao Termo
+    // mostrando o tamanho da palavra-alvo antes do primeiro palpite).
+    wordLengths: buildWordLengths(book.title)
   };
 }
 
