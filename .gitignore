@@ -4,6 +4,7 @@ dist
 *.log
 .env
 docs
+.superpowers
 
 # Backend
 server/node_modules
