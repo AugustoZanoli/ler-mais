@@ -17,9 +17,11 @@
       #game-root {
         width: 100vw;
         height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        /* Centralização é feita pelo próprio Phaser (Scale.CENTER_BOTH),
+           que já ajusta margin-left/margin-top do canvas. Usar flexbox
+           aqui soma uma segunda centralização por cima, deslocando o
+           canvas em telas com proporção muito diferente de 16:9. */
+        position: relative;
       }
       /* Pixelart: sem suavização ao escalar */
       canvas {
