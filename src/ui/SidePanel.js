@@ -267,17 +267,24 @@ export default class SidePanel {
     g.fillStyle(0x3a2c22, 0.18);
     g.lineStyle(1, 0x3a2c22, 0.35);
 
+    // Posição (borda esquerda) de cada caixinha, agrupada por palavra —
+    // guardada pra renderInputText poder centralizar cada letra digitada
+    // exatamente em cima da caixinha correspondente.
+    const cellsByWord = [];
     let x = left + padX;
     lengths.forEach((len) => {
+      const xs = [];
       for (let i = 0; i < len; i++) {
         g.fillRect(x, y, cellW, cellH);
         g.strokeRect(x, y, cellW, cellH);
+        xs.push(x);
         x += cellW + letterGap;
       }
+      cellsByWord.push(xs);
       x += wordGap - letterGap;
     });
 
-    return g;
+    return { graphics: g, cellsByWord, cellW, cellH, y, letterGap, wordGap };
   }
 
   // ---- Input desenhado no PRÓPRIO Phaser (não é DOM) ----
@@ -303,7 +310,8 @@ export default class SidePanel {
       .setInteractive({ useHandCursor: true });
 
     // Fundo sutil com a estrutura do título (ver buildWordLengthGuide).
-    this.wordGuideG = this.buildWordLengthGuide(left, fieldH);
+    this.inputLeft = left;
+    this.wordGuide = this.buildWordLengthGuide(left, fieldH);
 
     // Texto digitado (ou placeholder).
     this.inputText = this.scene.add.text(left + 8, L.inputY + fieldH / 2, '', {
@@ -328,7 +336,7 @@ export default class SidePanel {
       .setOrigin(0.5);
 
     const inputChildren = [this.inputBox];
-    if (this.wordGuideG) inputChildren.push(this.wordGuideG);
+    if (this.wordGuide) inputChildren.push(this.wordGuide.graphics);
     inputChildren.push(this.inputText, this.submitBtn, this.submitLabel);
     this.inputGroup.add(inputChildren);
 
@@ -362,14 +370,57 @@ export default class SidePanel {
       this.renderInputText();
       return;
     }
+    // Com o guia de caixinhas, o espaço é a ação visível de "ir pra próxima
+    // palavra" — por isso bloqueia espaço duplicado ou no início (não há
+    // palavra vazia pra separar) em vez de deixar virar um caractere "mudo"
+    // que só aparece ao apertar Backspace várias vezes sem feedback. Também
+    // bloqueia espaço além do número de palavras previsto pela estrutura
+    // (senão dava pra criar dezenas de "palavras" de 1 letra cada).
+    if (ev.key === ' ' && this.wordGuide) {
+      if (!this.typed || this.typed.endsWith(' ')) return;
+      const wordCount = this.typed.split(' ').length;
+      if (wordCount >= this.wordGuide.cellsByWord.length) return;
+      if (this.typed.length < 60) this.typed += ' ';
+      this.renderInputText();
+      return;
+    }
     // Aceita letras, números, espaço e alguns sinais comuns de título.
     if (ev.key.length === 1 && /[\p{L}\p{N} '\-:.,&!?]/u.test(ev.key)) {
+      // Com o guia de caixinhas, cada palavra trava no tamanho previsto pra
+      // estrutura (nenhuma letra "transborda" pra fora da caixinha, nem na
+      // última palavra). Quando bate o limite: se existe uma próxima
+      // palavra, avança sozinho pra ela (digitação contínua, sem precisar
+      // apertar espaço); se é a última palavra, bloqueia de vez.
+      if (this.wordGuide) {
+        const words = this.typed.split(' ');
+        const wi = words.length - 1;
+        const currentWord = words[wi];
+        const cells = this.wordGuide.cellsByWord[wi];
+        if (cells && currentWord.length >= cells.length) {
+          const hasNextWord = Boolean(this.wordGuide.cellsByWord[wi + 1]);
+          if (!hasNextWord) return;
+          this.typed += ' ';
+        }
+      }
       if (this.typed.length < 60) this.typed += ev.key;
       this.renderInputText();
     }
   }
 
   renderInputText() {
+    // Letras avulsas da digitação anterior (modo "caixinhas") — redesenha do zero.
+    if (this.letterTexts) this.letterTexts.forEach((t) => t.destroy());
+    this.letterTexts = [];
+
+    if (this.wordGuide) {
+      this.renderBoxedInput();
+    } else {
+      this.renderPlainInput();
+    }
+  }
+
+  // Sem dica de estrutura (puzzle sem wordLengths): texto corrido simples.
+  renderPlainInput() {
     const w = PANEL_WIDTH - 40;
     const cursor = this.inputFocused ? '|' : '';
     if (this.typed) {
@@ -384,6 +435,78 @@ export default class SidePanel {
       this.inputText.setX(this.x + 20 + 8 - overflow);
     } else {
       this.inputText.setX(this.x + 20 + 8);
+    }
+  }
+
+  // Com dica de estrutura: cada letra digitada vai centralizada na sua
+  // caixinha, respeitando a QUEBRA REAL em palavras de `this.typed` (não um
+  // índice global que ignora onde o espaço foi digitado). Assim, se o
+  // jogador esquecer o espaço, a palavra seguinte visivelmente continua
+  // dentro do mesmo grupo de caixinhas em vez de "pular" pro grupo certo
+  // por coincidência de contagem. Se o palpite tiver mais letras/palavras
+  // do que a estrutura prevê, continua à direita, no mesmo espaçamento.
+  renderBoxedInput() {
+    const { cellsByWord, cellW, cellH, y, letterGap, wordGap } = this.wordGuide;
+    const fontSize = Math.max(9, Math.min(14, cellW + 4));
+    const cy = y + cellH / 2;
+    const typedWords = this.typed.length ? this.typed.split(' ') : [];
+
+    // Borda esquerda do próximo slot quando não há caixinha prevista ali.
+    let freeX = this.inputLeft + 8;
+
+    typedWords.forEach((word, wi) => {
+      const cells = cellsByWord[wi];
+      for (let li = 0; li < word.length; li++) {
+        const useGuide = cells && li < cells.length;
+        const leftX = useGuide ? cells[li] : freeX;
+        const t = this.scene.add
+          .text(leftX + cellW / 2, cy, word[li].toUpperCase(), {
+            fontFamily: 'Courier New, monospace',
+            fontSize: `${fontSize}px`,
+            color: '#3b2a1f',
+            fontStyle: 'bold'
+          })
+          .setOrigin(0.5);
+        this.inputGroup.add(t);
+        this.letterTexts.push(t);
+        freeX = leftX + cellW + letterGap;
+      }
+      // Entre palavras: alinha o próximo slot livre ao início do grupo
+      // seguinte (se a estrutura prevê um), senão soma o espaçamento padrão.
+      if (wi < typedWords.length - 1) {
+        const nextCells = cellsByWord[wi + 1];
+        freeX = nextCells ? nextCells[0] : freeX + (wordGap - letterGap);
+      }
+    });
+
+    // Posição do cursor: logo depois da última letra digitada (ou no início
+    // do grupo seguinte, se o último caractere digitado foi um espaço).
+    const lastWi = typedWords.length - 1;
+    const lastWord = typedWords[lastWi] || '';
+    const lastCells = cellsByWord[lastWi];
+    const cursorLeftX =
+      lastCells && lastWord.length < lastCells.length ? lastCells[lastWord.length] : freeX;
+
+    if (this.inputFocused) {
+      const cursor = this.scene.add
+        .text(cursorLeftX + cellW / 2, cy, '|', {
+          fontFamily: 'Courier New, monospace',
+          fontSize: `${fontSize}px`,
+          color: '#3b2a1f'
+        })
+        .setOrigin(0.5);
+      this.inputGroup.add(cursor);
+      this.letterTexts.push(cursor);
+    } else if (!this.typed) {
+      const ph = this.scene.add
+        .text(this.inputLeft + 8, cy, 'Qual é o livro?', {
+          fontFamily: 'Courier New, monospace',
+          fontSize: '14px',
+          color: '#9b8b73'
+        })
+        .setOrigin(0, 0.5);
+      this.inputGroup.add(ph);
+      this.letterTexts.push(ph);
     }
   }
 
@@ -435,7 +558,7 @@ export default class SidePanel {
     const L = SidePanel.LAYOUT;
     const cell = 20;
     const gap = 2;
-    const wordGap = 8;
+    const wordGap = 14; // bem maior que `gap` pra não parecer que a palavra ficou colada
     const rowH = cell + 6;
 
     // Coordenadas relativas ao topo da lista; o scroll move o container.
