@@ -9,3 +9,5 @@ docs
 # Backend
 server/node_modules
 server/.env
+.neon
+.env.local
