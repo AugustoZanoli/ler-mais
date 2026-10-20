@@ -1,0 +1,47 @@
+# Blueprint do Render para o Ler+.
+# Banco: Postgres no Neon (fora do Render). Cole as connection strings
+# quando o Render pedir, na criação do Blueprint.
+# Variáveis com `sync: false` são preenchidas no painel do Render.
+
+services:
+  # API (Fastify + Prisma)
+  - type: web
+    name: ler-mais-api
+    runtime: node
+    plan: free
+    region: virginia
+    rootDir: server
+    buildCommand: npm ci
+    # Aplica as migrations pendentes antes de subir o servidor.
+    startCommand: npm run prisma:deploy && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # Valores de `.env.local` (gerado por `neon deploy`): pooled para o app,
+      # direta para as migrations.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # URL do front (ex: https://ler-mais.onrender.com). Aceita várias, separadas por vírgula.
+      - key: CORS_ORIGIN
+        sync: false
+
+  # Front (Vite + Phaser, estático)
+  - type: web
+    name: ler-mais
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    buildFilter:
+      ignoredPaths:
+        - server/**
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # URL da API (ex: https://ler-mais-api.onrender.com). Lida no build do Vite.
+      - key: VITE_API_URL
+        sync: false

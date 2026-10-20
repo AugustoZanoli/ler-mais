@@ -1,20 +1,27 @@
 // Ponto de entrada do backend Fastify.
-import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import routes from './routes.js';
 import { prisma } from './lib/prisma.js';
 
 const PORT = Number(process.env.PORT ?? 3333);
-const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+// Aceita várias origens separadas por vírgula (ex: produção + localhost).
+const CORS_ORIGIN = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const IS_PROD = process.env.NODE_ENV === 'production';
 
+// Em produção loga JSON puro (pino-pretty é só dependência de dev).
 const fastify = Fastify({
-  logger: {
-    transport: {
-      target: 'pino-pretty',
-      options: { colorize: true }
-    }
-  }
+  logger: IS_PROD
+    ? true
+    : {
+        transport: {
+          target: 'pino-pretty',
+          options: { colorize: true }
+        }
+      }
 });
 
 await fastify.register(cors, {
