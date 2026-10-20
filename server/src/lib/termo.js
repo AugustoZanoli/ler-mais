@@ -31,6 +31,13 @@ function toWords(text) {
     .filter(Boolean);
 }
 
+// Tamanho de cada palavra do título (dica estrutural, não revela letras).
+// Usado tanto no feedback de palpite (checkGuess) quanto no payload público
+// do puzzle (toPublicPuzzle), pra mostrar a "forma" do título antes de jogar.
+export function buildWordLengths(title) {
+  return toWords(title).map((w) => w.length);
+}
+
 // Multiconjunto de letras de um conjunto de palavras (pra checar 'purple').
 function letterCounts(words) {
   const m = new Map();

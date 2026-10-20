@@ -11,7 +11,7 @@
 import { prisma } from '../lib/prisma.js';
 import { fetchWork, isPlayable, resolveBestCover } from '../lib/openLibrary.js';
 import { maskSynopsis } from '../lib/mask.js';
-import { scoreGuess } from '../lib/termo.js';
+import { scoreGuess, buildWordLengths } from '../lib/termo.js';
 import { todayUTC } from '../lib/date.js';
 
 /**
@@ -118,7 +118,10 @@ export function toPublicPuzzle(puzzle) {
     synopsisMasked: masked,
     // Metadados úteis pro front sem vazar a resposta:
     titleLength: book.title.length,
-    wordCount: book.title.trim().split(/\s+/).length
+    wordCount: book.title.trim().split(/\s+/).length,
+    // Tamanho de cada palavra do título (dica estrutural, igual ao Termo
+    // mostrando o tamanho da palavra-alvo antes do primeiro palpite).
+    wordLengths: buildWordLengths(book.title)
   };
 }
 
@@ -153,13 +156,7 @@ export async function checkGuess(guess, date = todayUTC()) {
   const { correct, words } = scoreGuess(guess, puzzle.book.title);
 
   // Comprimento de cada palavra do título (dica de estrutura, não vaza letras).
-  const wordLengths = puzzle.book.title
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.length);
+  const wordLengths = buildWordLengths(puzzle.book.title);
 
   return {
     correct,
